@@ -226,3 +226,5 @@ And in case anyone on your team gets worried about running out of space, show th
 ```
 
 Obviously, you're not going to need 4,094 IP addresses for your web servers. That's not the point. The point is that this VPC has only those routing requirements. There's no reason to create new subnets in this VPC that don't need to route differently within the same AZ.
+
+Check [this guy's VPC layout as well](http://alexschoof.com/posts/my-vpc-layout.html)
