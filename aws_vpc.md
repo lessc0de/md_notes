@@ -136,3 +136,93 @@ As before, select the route table associated with the ELB tier and add the follo
 Create a load balancer inside your VPC. The subnets to be balanced should be the __app subnets__.
 
 Remember to enable the __App sg__ inbound ports to the ELB sg so that the ELB can route traffic to backend app servers. Also make sure that the __ELB sg__ HTTP and HTTPS ports are publicly accessible (`0.0.0.0/0`)
+
+
+# [Practical VPC Design](https://medium.com/aws-activate-startup-blog/practical-vpc-design-8412e1a18dcc#.xve35vrcp)
+
+Let's create a standard n-tier app with web hosts that are addressable externally. We'll use `10.0.0.0/16` as our address space.
+
+The easiest way to layout a VPC's address space is to forget about IP ranges and think in terms of subnet masks.
+
+For example, take the `10.0.0.0/16` address space above. Let's assume you want to run across all three AZs available to you in `us-west-2` (e.g. so your Mongo cluster can achieve a reliable quorum). Doing this by address ranges would be obnoxious. Instead, you can simply say "I need 4 blocks - one for each of the three AZs and one spare." __Since subnet masks are binary, every bit you add to the mask divides your space by two. So if you need four blocks, you need two more bits. Your 16-bit becomes four 18-bits.__
+
+```
+10.0.0.0/16
+    10.0.0.0/18     - AZ A
+    10.0.64.0/18    - AZ B
+    10.0.128.0/18   - AZ C
+    10.0.192.0/18   - Spare
+```
+
+Now within each AZ, let's say you determine that you want a public subnet, a private subnet, and some spare capacity. Your publicly-accessible hosts will be far fewer in number than your internal-only ones, so you decide to give the public subnets half the space of the private ones. To create the separate address spaces, you just keep adding bits.
+
+```
+10.0.0.0/18           - AZ A
+    10.0.0.0/19       - Private
+    10.0.32.0/19
+        10.0.32.0/20  - Public
+        10.0.48.0/20  - Spare
+```
+
+Later on, if you want to add a "Protected" subnet with [NACL's](http://docs.aws.amazon.com/AmazonVPC/latest/UserGuide/VPC_ACLs.html), you just subdivide your spare space:
+
+```
+10.0.0.0/18           - AZ A
+    10.0.0.0/19       - Private
+    10.0.32.0/19
+        10.0.32.0/20  - Public
+        10.0.48.0/21  - Protected
+        10.0.56.0/21  - Spare
+```
+
+Just make sure whatever you do in one AZ, you duplicate in all the others:
+
+```
+10.0.0.0/16
+    10.0.0.0/18           - AZ A
+        10.0.0.0/19       - Private
+        10.0.32.0/19
+            10.0.32.0/20  - Public
+            10.0.48.0/21  - Protected
+            10.0.56.0/21  - Spare
+
+    10.0.0.0/18           - AZ B
+        10.0.0.0/19       - Private
+        10.0.32.0/19
+            10.0.32.0/20  - Public
+            10.0.48.0/21  - Protected
+            10.0.56.0/21  - Spare
+
+    10.0.0.0/18           - AZ C
+        10.0.0.0/19       - Private
+        10.0.32.0/19
+            10.0.32.0/20  - Public
+            10.0.48.0/21  - Protected
+            10.0.56.0/21  - Spare
+
+    10.0.0.0/18           - Spare
+```
+
+Your routing tables would look like this:
+
+```
+"Public"
+    10.0.0.0/16 - Local
+    0.0.0.0/0   - Internet Gateway
+
+"Internal-only" (i.e. Protected or Private)
+    10.0.0.0/16 - Local
+```
+
+Create those two route-tables and then apply them to the correct subnets in each AZ. You're done.
+
+And in case anyone on your team gets worried about running out of space, show them this table:
+
+```
+16-bit: 65534 addresses
+18-bit: 16382 addresses
+19-bit: 8190 addresses
+20-bit: 4094 addresses
+```
+
+Obviously, you're not going to need 4,094 IP addresses for your web servers. That's not the point. The point is that this VPC has only those routing requirements. There's no reason to create new subnets in this VPC that don't need to route differently within the same AZ.
